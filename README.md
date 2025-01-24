@@ -29,6 +29,7 @@ Ensure you have Python installed along with the following libraries:
 Install the required libraries using pip:
 ```bash
 pip install streamlit pandas seaborn matplotlib textblob
+```
 
 
 Example Visualization 
