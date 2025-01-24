@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from datetime import datetime
 from textblob import TextBlob
 
 # Set up Streamlit page
@@ -15,7 +14,7 @@ def load_data():
     # Check for column existence before dropping NA
     required_columns = ['product_id', 'product_name', 'discounted_price', 
                         'actual_price', 'rating', 'rating_count']
-    optional_columns = ['category', 'date', 'review_text']
+    optional_columns = ['category', 'review_content']
     
     missing_columns = [col for col in required_columns + optional_columns if col not in df.columns]
     if missing_columns:
@@ -42,119 +41,104 @@ def load_data():
     if 'rating' in df.columns and 'rating_count' in df.columns:
         df['sales_volume'] = df['rating_count'] * df['rating']
     
-    # Process 'category' to only include the first two levels
-    if 'category' in df.columns:
-        df['category'] = df['category'].str.split('|').str[:2].str.join('|')
-    
-    # Convert 'date' to datetime if it exists
-    if 'date' in df.columns:
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    # Sentiment column handling: If it doesn't exist, analyze the sentiment of the reviews
+    if 'review_sentiment' not in df.columns:
+        if 'review_content' in df.columns:
+            df['sentiment_score'] = df['review_content'].apply(lambda x: TextBlob(str(x)).sentiment.polarity)
+            
+            # Classify sentiment based on the polarity score
+            df['review_sentiment'] = df['sentiment_score'].apply(
+                lambda score: 'Positive' if score > 0 else ('Negative' if score < 0 else 'Neutral')
+            )
+        else:
+            st.warning("No 'review_text' column found. A default 'Neutral' sentiment will be assigned to all rows.")
+            df['review_sentiment'] = 'Neutral'  # Fallback if no review text exists
     
     return df
 
-
-# Sentiment analysis function
-def analyze_sentiment(text):
-    analysis = TextBlob(text)
-    if analysis.sentiment.polarity > 0:
-        return "Positive"
-    elif analysis.sentiment.polarity < 0:
-        return "Negative"
-    else:
-        return "Neutral"
-
-# Load data
+# Load the dataset
 df = load_data()
 
-# Perform sentiment analysis
-df['review_sentiment'] = df['review_content'].apply(lambda x: analyze_sentiment(x) if pd.notnull(x) else "Neutral")
-
-
-# Sidebar filters
-st.sidebar.title("Filters")
-st.sidebar.header("Filter Dataset")
-
-categories = df['category'].unique()
-selected_category = st.sidebar.selectbox("Select Category", ["All Categories"] + list(categories))
-
-if selected_category != "All Categories":
-    df = df[df['category'] == selected_category]
-
-min_rating, max_rating = st.sidebar.slider("Filter by Rating", 0.0, 5.0, (0.0, 5.0), key="rating_slider")
-df = df[(df['rating'] >= min_rating) & (df['rating'] <= max_rating)]
-
-min_price, max_price = st.sidebar.slider("Filter by Discounted Price", 0.0, float(df['discounted_price'].max()), (0.0, float(df['discounted_price'].max())), key="price_slider")
-df = df[(df['discounted_price'] >= min_price) & (df['discounted_price'] <= max_price)]
-
+# Section: Four Key Analyses in a Row
 st.title("E-commerce Sales Analysis")
+st.markdown("Explore the key metrics that impact sales performance. Filter the data by category to gain tailored insights.")
 
-st.markdown("---")
+# Create five columns for the visualizations and category selection
+col1, col2, col3, col4, col5 = st.columns(5)
 
-# Section 1: Discount Analysis
-st.header("Discount Analysis")
-if 'category' in df.columns:
-    st.subheader("Average Discount Percentage by Category")
-    discount_by_category = df.groupby('category')['discount_percentage'].mean().sort_values(ascending=False)
-    st.bar_chart(discount_by_category)
+# Category Selection in the First Column
+with col1:
+    st.subheader("Category Selection")
+    if 'category' in df.columns:
+        categories = df['category'].unique()
+        selected_category = st.selectbox(
+            "Select a Category",
+            ["All Categories"] + list(categories),
+            key="category_select",
+        )
+        if selected_category != "All Categories":
+            df = df[df['category'] == selected_category]
+    st.markdown("Filter the data by product categories to analyze specific trends.")
 
-st.subheader("Discount Percentage vs. Sales Volume")
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.scatterplot(data=df, x='discount_percentage', y='sales_volume', alpha=0.5, ax=ax)
-ax.set_title('Discount Percentage vs. Sales Volume')
-st.pyplot(fig)
+# 1. Discount Percentage vs. Sales Volume
+with col2:
+    fig1, ax1 = plt.subplots(figsize=(5, 5))
+    sns.scatterplot(data=df, x='discount_percentage', y='sales_volume', alpha=0.6, ax=ax1)
+    ax1.set_title("Discount % vs. Sales Volume")
+    ax1.set_xlabel("Discount Percentage")
+    ax1.set_ylabel("Sales Volume")
+    st.pyplot(fig1)
+    st.subheader("Discount Percentage vs. Sales Volume")
 
-# Section 2: Pricing Analysis
-st.header("Pricing Analysis")
-st.subheader("Actual Price vs. Discounted Price")
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.scatterplot(data=df, x='actual_price', y='discounted_price', hue='sales_volume', palette='viridis', alpha=0.6, ax=ax)
-ax.set_title('Actual Price vs. Discounted Price with Sales Volume')
-st.pyplot(fig)
+# 2. Actual Price vs. Discounted Price
+with col3:
+    fig2, ax2 = plt.subplots(figsize=(5, 5))
+    sns.scatterplot(data=df, x='actual_price', y='discounted_price', hue='sales_volume', palette='viridis', alpha=0.6, ax=ax2)
+    ax2.set_title("Actual vs. Discounted Price")
+    ax2.set_xlabel("Actual Price")
+    ax2.set_ylabel("Discounted Price")
+    st.pyplot(fig2)
+    st.subheader("Actual Price vs. Discounted Price")
 
-st.subheader("Correlation Matrix: Prices, Ratings, and Review Counts")
-correlation_matrix = df[['actual_price', 'rating', 'rating_count']].corr()
-fig, ax = plt.subplots(figsize=(8, 6))
-sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', ax=ax)
-st.pyplot(fig)
+# 3. Correlation Matrix: Prices, Ratings, and Review Counts
+with col4:
+    correlation_matrix = df[['actual_price', 'discounted_price', 'rating', 'rating_count']].corr()
+    fig3, ax3 = plt.subplots(figsize=(5, 5))
+    sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', ax=ax3)
+    ax3.set_title("Correlation Matrix")
+    st.pyplot(fig3)
+    st.subheader("Correlation Matrix")
 
-# Section 3: Ratings & Review Analysis
-st.header("Ratings & Review Analysis")
-st.subheader("Distribution of Ratings")
-fig, ax = plt.subplots(figsize=(8, 6))
-sns.histplot(data=df, x='rating', bins=10, kde=True, color='purple', ax=ax)
-ax.set_title('Distribution of Ratings')
-st.pyplot(fig)
+# 4. Distribution of Ratings
+with col5:
+    fig4, ax4 = plt.subplots(figsize=(5, 5))
+    sns.histplot(data=df, x='rating', bins=10, kde=True, color='purple', ax=ax4)
+    ax4.set_title("Distribution of Ratings")
+    ax4.set_xlabel("Rating")
+    ax4.set_ylabel("Count")
+    st.pyplot(fig4)
+    st.subheader("Distribution of Ratings")
 
-st.subheader("Products with High Ratings but Low Sales")
-high_ratings_low_sales = df[(df['rating'] >= 4.5) & (df['sales_volume'] <= 50)]
-st.dataframe(high_ratings_low_sales[['product_name', 'rating', 'sales_volume']])
-
-st.subheader("Products with Low Ratings but High Sales")
-low_ratings_high_sales = df[(df['rating'] < 4.5) & (df['sales_volume'] > 50)]
-st.dataframe(low_ratings_high_sales[['product_name', 'rating', 'sales_volume']])
-
-# Sentiment Analysis Section
+# Sentiment Analysis Section in a Grid
 st.header("Review Sentiment Analysis")
-sentiment_counts = df['review_sentiment'].value_counts()
-st.subheader("Sentiment Distribution")
-fig, ax = plt.subplots(figsize=(8, 6))
-sns.barplot(x=sentiment_counts.index, y=sentiment_counts.values, palette="viridis", ax=ax)
-ax.set_title("Distribution of Review Sentiments")
-ax.set_xlabel("Sentiment")
-ax.set_ylabel("Count")
-st.pyplot(fig)
+col6, col7 = st.columns(2)
 
-st.subheader("Impact of Sentiment on Sales")
-sentiment_sales = df.groupby('review_sentiment')['sales_volume'].mean().reset_index()
-fig, ax = plt.subplots(figsize=(8, 6))
-sns.barplot(data=sentiment_sales, x='review_sentiment', y='sales_volume', palette="viridis", ax=ax)
-ax.set_title("Average Sales Volume by Review Sentiment")
-ax.set_xlabel("Sentiment")
-ax.set_ylabel("Average Sales Volume")
-st.pyplot(fig)
+# Sentiment Distribution
+with col6:
+    sentiment_counts = df['review_sentiment'].value_counts()
+    fig5, ax5 = plt.subplots(figsize=(5, 5))
+    sns.barplot(x=sentiment_counts.index, y=sentiment_counts.values, palette="viridis", ax=ax5)
+    ax5.set_title("Distribution of Review Sentiments")
+    ax5.set_xlabel("Sentiment")
+    ax5.set_ylabel("Count")
+    st.pyplot(fig5)
 
-st.subheader("Comparison of Discounts and Sentiment")
-df['discount_group'] = pd.cut(df['discount_percentage'], bins=[0, 20, 50, 100], labels=["Low", "Medium", "High"])
-discount_sentiment = df.groupby(['discount_group', 'review_sentiment'])['sales_volume'].mean().unstack()
-st.write("Average Sales Volume by Discount Group and Sentiment")
-st.dataframe(discount_sentiment)
+# Impact of Sentiment on Sales
+with col7:
+    sentiment_sales = df.groupby('review_sentiment')['sales_volume'].mean().reset_index()
+    fig6, ax6 = plt.subplots(figsize=(5, 5))
+    sns.barplot(data=sentiment_sales, x='review_sentiment', y='sales_volume', palette="viridis", ax=ax6)
+    ax6.set_title("Average Sales Volume by Review Sentiment")
+    ax6.set_xlabel("Sentiment")
+    ax6.set_ylabel("Average Sales Volume")
+    st.pyplot(fig6)
